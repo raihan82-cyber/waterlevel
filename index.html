@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Dashboard monitoring pasang surut air laut real-time dengan sensor ESP32 dan JSN-SR04. Pantau ketinggian air, history, dan prediksi pasang surut.">
+  <meta name="keywords" content="pasang surut, monitoring air laut, ESP32, sensor ultrasonik, tide monitoring">
+  <title>🌊 Monitoring Pasang Surut Air Laut</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <!-- Firebase SDK (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Background -->
+  <div class="bg-gradient"></div>
+
+  <!-- Wave Animation -->
+  <div class="wave-container">
+    <div class="wave wave-1"></div>
+    <div class="wave wave-2"></div>
+    <div class="wave wave-3"></div>
+  </div>
+
+  <!-- Main App -->
+  <div class="app-container">
+
+    <!-- ==================== HEADER ==================== -->
+    <header class="header fade-in">
+      <div class="header-icon">🌊</div>
+      <h1>Monitoring Pasang Surut Air Laut</h1>
+      <p class="subtitle">Sistem Pengukuran Real-time · ESP32 + JSN-SR04 + Firebase</p>
+      <div class="datetime" id="datetime">
+        <span class="pulse-dot" id="connectionDot"></span>
+        <span id="clock">--:--:--</span>
+        <span>•</span>
+        <span id="date">-- --- ----</span>
+        <span>•</span>
+        <span id="connectionStatus" style="font-size: 0.75rem;">Menghubungkan...</span>
+      </div>
+    </header>
+
+    <!-- ==================== ROW 1: Gauge + Status + Stats ==================== -->
+    <div class="dashboard-grid fade-in">
+
+      <!-- Gauge Card -->
+      <div class="card gauge-card" id="gaugeCard">
+        <div class="card-title">
+          <span class="icon">📊</span>
+          Ketinggian Air Saat Ini
+        </div>
+        <div class="gauge-wrapper">
+          <canvas id="gaugeCanvas" width="440" height="260"></canvas>
+          <div class="gauge-value">
+            <div class="number" id="gaugeNumber">--</div>
+            <div class="unit">cm</div>
+          </div>
+        </div>
+        <div id="statusBadge" class="status-badge normal">
+          <span class="status-dot"></span>
+          <span id="statusText">NORMAL</span>
+        </div>
+      </div>
+
+      <!-- Threshold & Trend Card -->
+      <div class="card" id="thresholdCard">
+        <div class="card-title">
+          <span class="icon">⚡</span>
+          Level & Tren
+        </div>
+
+        <!-- Current trend -->
+        <div style="text-align: center; margin-bottom: var(--space-lg);">
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--space-sm);">Tren Saat Ini</div>
+          <div id="trendIndicator" class="trend stable">
+            <span id="trendIcon">→</span>
+            <span id="trendText">Stabil</span>
+          </div>
+        </div>
+
+        <!-- Threshold bars -->
+        <div class="threshold-bars">
+          <div class="threshold-bar normal">
+            <span class="label">Normal</span>
+            <div class="bar">
+              <div class="bar-fill" id="barNormal" style="width: 50%;"></div>
+            </div>
+            <span class="value">&lt; 50 cm</span>
+          </div>
+          <div class="threshold-bar waspada">
+            <span class="label">Waspada</span>
+            <div class="bar">
+              <div class="bar-fill" id="barWaspada" style="width: 0%;"></div>
+            </div>
+            <span class="value">50-70 cm</span>
+          </div>
+          <div class="threshold-bar bahaya">
+            <span class="label">Bahaya</span>
+            <div class="bar">
+              <div class="bar-fill" id="barBahaya" style="width: 0%;"></div>
+            </div>
+            <span class="value">&gt; 80 cm</span>
+          </div>
+        </div>
+
+        <!-- Jarak sensor -->
+        <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px solid var(--glass-border);">
+          <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+            <span style="color: var(--text-muted);">Jarak Sensor</span>
+            <span id="jarakSensor" style="font-family: 'JetBrains Mono', monospace; color: var(--text-primary);">-- cm</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-top: var(--space-xs);">
+            <span style="color: var(--text-muted);">Tinggi Sensor</span>
+            <span style="font-family: 'JetBrains Mono', monospace; color: var(--text-primary);">100 cm</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stat Cards -->
+      <div class="card" id="statsCard">
+        <div class="card-title">
+          <span class="icon">📈</span>
+          Statistik 24 Jam
+        </div>
+        <div class="stat-grid" style="grid-template-columns: 1fr;">
+          <div class="stat-item min">
+            <div class="stat-label">Surut Terendah</div>
+            <div class="stat-value" id="statMin">--</div>
+            <div class="stat-unit">cm</div>
+          </div>
+          <div class="stat-item max">
+            <div class="stat-label">Pasang Tertinggi</div>
+            <div class="stat-value" id="statMax">--</div>
+            <div class="stat-unit">cm</div>
+          </div>
+          <div class="stat-item avg">
+            <div class="stat-label">Rata-rata</div>
+            <div class="stat-value" id="statAvg">--</div>
+            <div class="stat-unit">cm</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== ROW 2: History Chart ==================== -->
+    <div class="dashboard-grid fade-in">
+      <div class="card full-width" id="historyChartCard">
+        <div class="card-title">
+          <span class="icon">📉</span>
+          History Ketinggian Air — 24 Jam Terakhir
+        </div>
+        <div class="chart-tabs">
+          <button class="chart-tab active" data-range="24h" onclick="switchHistoryRange('24h', this)">24 Jam</button>
+          <button class="chart-tab" data-range="12h" onclick="switchHistoryRange('12h', this)">12 Jam</button>
+          <button class="chart-tab" data-range="6h" onclick="switchHistoryRange('6h', this)">6 Jam</button>
+          <button class="chart-tab" data-range="1h" onclick="switchHistoryRange('1h', this)">1 Jam</button>
+        </div>
+        <div class="chart-container">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== ROW 3: Prediction Chart ==================== -->
+    <div class="dashboard-grid fade-in">
+      <div class="card full-width" id="predictionChartCard">
+        <div class="card-title">
+          <span class="icon">🔮</span>
+          Prediksi Pasang Surut — 24 Jam Ke Depan
+        </div>
+        <div class="chart-container">
+          <canvas id="predictionChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== ROW 4: Data Table + Info ==================== -->
+    <div class="dashboard-grid fade-in">
+
+      <!-- Data Table -->
+      <div class="card two-thirds" id="dataTableCard">
+        <div class="card-title">
+          <span class="icon">📋</span>
+          Data Pembacaan Terakhir
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="dataTable">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Tinggi Air</th>
+                <th>Jarak Sensor</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="dataTableBody">
+              <!-- Diisi oleh JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- System Info -->
+      <div class="card" id="infoCard">
+        <div class="card-title">
+          <span class="icon">🔧</span>
+          Info Sistem
+        </div>
+        <div class="info-grid" style="grid-template-columns: 1fr;">
+          <div class="info-item">
+            <span class="info-icon">🔌</span>
+            <div>
+              <div class="info-label">Mikrokontroler</div>
+              <div class="info-value">ESP32 DevKit</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">📡</span>
+            <div>
+              <div class="info-label">Sensor</div>
+              <div class="info-value">JSN-SR04 Ultrasonik</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">📏</span>
+            <div>
+              <div class="info-label">Tinggi Sensor</div>
+              <div class="info-value">100 cm dari dasar</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">⏱️</span>
+            <div>
+              <div class="info-label">Interval Baca</div>
+              <div class="info-value">1 detik</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">🔔</span>
+            <div>
+              <div class="info-label">Alarm</div>
+              <div class="info-value">Buzzer GPIO 4</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">🖥️</span>
+            <div>
+              <div class="info-label">Display</div>
+              <div class="info-value">LCD I2C 16×2</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== ROW 5: History Per Tanggal ==================== -->
+    <div class="dashboard-grid fade-in">
+      <div class="card full-width" id="dailyHistoryCard">
+        <div class="card-title">
+          <span class="icon">📅</span>
+          History Per Tanggal
+        </div>
+
+        <!-- Date Picker Navigation -->
+        <div class="date-picker-row">
+          <button class="date-nav-btn" id="btnPrevDay" onclick="navigateDay(-1)" title="Tanggal Sebelumnya yang Tersedia">
+            ◀
+          </button>
+          <div class="date-picker-wrapper">
+            <input type="date" id="historyDatePicker" class="date-input" onchange="onDatePickerChange(this.value)">
+            <span class="date-display" id="dateDisplay">-- --- ----</span>
+          </div>
+          <button class="date-nav-btn" id="btnNextDay" onclick="navigateDay(1)" title="Tanggal Berikutnya yang Tersedia">
+            ▶
+          </button>
+          <button class="date-nav-btn today-btn" onclick="goToToday()" title="Hari Ini">
+            Hari Ini
+          </button>
+        </div>
+
+        <!-- Available Dates Bar (Daftar tanggal yang ada di Firebase) -->
+        <div class="available-dates-bar" id="availableDatesBar">
+          <div class="available-dates-header">
+            <span class="available-dates-title">📁 Tanggal Tersimpan di Firebase:</span>
+            <select id="availableDateSelect" class="available-date-select" onchange="onSelectAvailableDate(this.value)">
+              <option value="">-- Memuat tanggal dari Firebase... --</option>
+            </select>
+          </div>
+          <div class="available-date-pills" id="availableDatePills">
+            <!-- Chip/pill tanggal akan diisi otomatis dari Firebase -->
+          </div>
+        </div>
+
+        <!-- Daily Stats Summary -->
+        <div class="daily-stats-row" id="dailyStatsRow">
+          <div class="daily-stat">
+            <span class="daily-stat-icon">📊</span>
+            <div>
+              <div class="daily-stat-label">Total Data</div>
+              <div class="daily-stat-value" id="dailyTotal">--</div>
+            </div>
+          </div>
+          <div class="daily-stat">
+            <span class="daily-stat-icon">📉</span>
+            <div>
+              <div class="daily-stat-label">Surut Terendah</div>
+              <div class="daily-stat-value min" id="dailyMin">-- cm</div>
+            </div>
+          </div>
+          <div class="daily-stat">
+            <span class="daily-stat-icon">📈</span>
+            <div>
+              <div class="daily-stat-label">Pasang Tertinggi</div>
+              <div class="daily-stat-value max" id="dailyMax">-- cm</div>
+            </div>
+          </div>
+          <div class="daily-stat">
+            <span class="daily-stat-icon">📐</span>
+            <div>
+              <div class="daily-stat-label">Rata-rata</div>
+              <div class="daily-stat-value avg" id="dailyAvg">-- cm</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Daily Chart -->
+        <div class="chart-container" style="margin-bottom: var(--space-lg);">
+          <canvas id="dailyHistoryChart"></canvas>
+        </div>
+
+        <!-- Loading / Empty State -->
+        <div class="daily-status" id="dailyStatus" style="display: none;">
+          <span id="dailyStatusIcon">📭</span>
+          <span id="dailyStatusText">Belum ada data untuk tanggal ini.</span>
+        </div>
+
+        <!-- Daily Data Table -->
+        <div class="table-container" id="dailyTableContainer" style="max-height: 500px;">
+          <table class="data-table" id="dailyDataTable">
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Waktu</th>
+                <th>Tinggi Air</th>
+                <th>Jarak Sensor</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="dailyTableBody">
+              <!-- Diisi oleh JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== FOOTER ==================== -->
+    <footer class="footer">
+      <p>🌊 Sistem Monitoring Pasang Surut Air Laut v2.0</p>
+      <p style="margin-top: 4px;">ESP32 + JSN-SR04 + Firebase + Web Dashboard</p>
+    </footer>
+
+  </div>
+
+  <!-- App Script -->
+  <script src="app.js"></script>
+
+</body>
+</html>
